@@ -134,11 +134,7 @@ impl Program {
                 envs.push(("JOLT_FUNC_NAME", func.to_string()));
             }
 
-            let target = format!(
-                "/tmp/jolt-guest-target-{}-{}",
-                self.guest,
-                self.func.as_ref().unwrap_or(&"".to_string())
-            );
+            let target = "target";
 
             let output = Command::new("cargo")
                 .envs(envs)
