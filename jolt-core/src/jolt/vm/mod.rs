@@ -93,19 +93,14 @@ impl<InstructionSet: JoltInstructionSet> JoltTraceStep<InstructionSet> {
 }
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-pub struct JoltProof<const C: usize, const M: usize, F, PCS, InstructionSet, Subtables>
+pub struct JoltProof<const C: usize, const M: usize, F, PCS>
 where
     F: JoltField,
     PCS: CommitmentScheme<Field = F>,
-    InstructionSet: JoltInstructionSet,
-    Subtables: JoltSubtableSet<F>,
 {
     pub trace_length: usize,
     pub program_io: JoltDevice,
     pub bytecode: BytecodeProof<F, PCS>,
-    pub read_write_memory: ReadWriteMemoryProof<F, PCS>,
-    pub instruction_lookups: InstructionLookupsProof<C, M, F, PCS, InstructionSet, Subtables>,
-    pub r1cs: UniformSpartanProof<F, PCS>,
 }
 
 pub struct JoltPolynomials<F, PCS>
@@ -131,10 +126,6 @@ pub struct JoltCommitments<PCS: CommitmentScheme> {
 impl<PCS: CommitmentScheme> JoltCommitments<PCS> {
     fn append_to_transcript(&self, transcript: &mut ProofTranscript) {
         self.bytecode.append_to_transcript(transcript);
-        self.read_write_memory.append_to_transcript(transcript);
-        self.timestamp_range_check.append_to_transcript(transcript);
-        self.instruction_lookups.append_to_transcript(transcript);
-        self.r1cs.as_ref().unwrap().append_to_transcript(transcript);
     }
 }
 
@@ -324,7 +315,7 @@ pub trait Jolt<F: JoltField, PCS: CommitmentScheme<Field = F>, const C: usize, c
         circuit_flags: Vec<F>,
         preprocessing: JoltPreprocessing<F, PCS>,
     ) -> (
-        JoltProof<C, M, F, PCS, Self::InstructionSet, Self::Subtables>,
+        JoltProof<C, M, F, PCS>,
         JoltCommitments<PCS>,
     ) {
         let trace_length = trace.len();
@@ -368,22 +359,6 @@ pub trait Jolt<F: JoltField, PCS: CommitmentScheme<Field = F>, const C: usize, c
         };
 
         let mut jolt_commitments = jolt_polynomials.commit(&preprocessing.generators);
-
-        let (witness_segments, r1cs_commitments, r1cs_builder) = Self::r1cs_setup(
-            padded_trace_length,
-            RAM_START_ADDRESS - program_io.memory_layout.ram_witness_offset,
-            &trace,
-            &jolt_polynomials,
-            circuit_flags,
-            &preprocessing.generators,
-        );
-
-        let spartan_key = spartan::UniformSpartanProof::<F, PCS>::setup_precommitted(
-            &r1cs_builder,
-            padded_trace_length,
-        );
-
-        jolt_commitments.r1cs = Some(r1cs_commitments);
         jolt_commitments.append_to_transcript(&mut transcript);
 
         let bytecode_proof = BytecodeProof::prove_memory_checking(
@@ -393,39 +368,12 @@ pub trait Jolt<F: JoltField, PCS: CommitmentScheme<Field = F>, const C: usize, c
             &mut transcript,
         );
 
-        let instruction_proof = InstructionLookupsProof::prove(
-            &preprocessing.generators,
-            &jolt_polynomials.instruction_lookups,
-            &preprocessing.instruction_lookups,
-            &mut transcript,
-        );
-
-        let memory_proof = ReadWriteMemoryProof::prove(
-            &preprocessing.generators,
-            &preprocessing.read_write_memory,
-            &jolt_polynomials,
-            &program_io,
-            &mut transcript,
-        );
-
         drop_in_background_thread(jolt_polynomials);
-
-        let spartan_proof = UniformSpartanProof::<F, PCS>::prove_precommitted(
-            &preprocessing.generators,
-            r1cs_builder,
-            &spartan_key,
-            witness_segments,
-            &mut transcript,
-        )
-        .expect("r1cs proof failed");
 
         let jolt_proof = JoltProof {
             trace_length,
             program_io,
             bytecode: bytecode_proof,
-            read_write_memory: memory_proof,
-            instruction_lookups: instruction_proof,
-            r1cs: spartan_proof,
         };
 
         (jolt_proof, jolt_commitments)
@@ -434,28 +382,11 @@ pub trait Jolt<F: JoltField, PCS: CommitmentScheme<Field = F>, const C: usize, c
     #[tracing::instrument(skip_all)]
     fn verify(
         mut preprocessing: JoltPreprocessing<F, PCS>,
-        proof: JoltProof<C, M, F, PCS, Self::InstructionSet, Self::Subtables>,
+        proof: JoltProof<C, M, F, PCS>,
         commitments: JoltCommitments<PCS>,
     ) -> Result<(), ProofVerifyError> {
         let mut transcript = ProofTranscript::new(b"Jolt transcript");
         Self::fiat_shamir_preamble(&mut transcript, &proof.program_io, proof.trace_length);
-
-        // Regenerate the uniform Spartan key
-        let padded_trace_length = proof.trace_length.next_power_of_two();
-
-        let memory_start = RAM_START_ADDRESS - proof.program_io.memory_layout.ram_witness_offset;
-
-        let r1cs_builder = construct_jolt_constraints(padded_trace_length, memory_start);
-
-        let spartan_key = spartan::UniformSpartanProof::<F, PCS>::setup_precommitted(
-            &r1cs_builder,
-            padded_trace_length,
-        );
-
-        let r1cs_proof = R1CSProof {
-            key: spartan_key,
-            proof: proof.r1cs,
-        };
 
         commitments.append_to_transcript(&mut transcript);
 
@@ -464,27 +395,6 @@ pub trait Jolt<F: JoltField, PCS: CommitmentScheme<Field = F>, const C: usize, c
             &preprocessing.generators,
             proof.bytecode,
             &commitments.bytecode,
-            &mut transcript,
-        )?;
-        Self::verify_instruction_lookups(
-            &preprocessing.instruction_lookups,
-            &preprocessing.generators,
-            proof.instruction_lookups,
-            &commitments.instruction_lookups,
-            &mut transcript,
-        )?;
-        Self::verify_memory(
-            &mut preprocessing.read_write_memory,
-            &preprocessing.generators,
-            proof.read_write_memory,
-            &commitments,
-            proof.program_io,
-            &mut transcript,
-        )?;
-        Self::verify_r1cs(
-            &preprocessing.generators,
-            r1cs_proof,
-            commitments,
             &mut transcript,
         )?;
         Ok(())
