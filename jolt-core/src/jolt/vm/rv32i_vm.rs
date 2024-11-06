@@ -172,7 +172,7 @@ where
     type Subtables = RV32ISubtables<F>;
 }
 
-pub type RV32IJoltProof<F, CS> = JoltProof<C, M, F, CS>;
+pub type RV32IJoltProof<F, CS> = JoltProof<0, C, M, F, CS>;
 
 use eyre::Result;
 use std::fs::File;

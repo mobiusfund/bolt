@@ -104,6 +104,7 @@ where
     let mut tasks = Vec::new();
     let mut program = host::Program::new(example_name);
     program.set_input(input);
+    let program_cp = program.clone();
 
     let task = move || {
         let (bytecode, memory_init) = program.decode();
@@ -124,7 +125,7 @@ where
         serialize_and_print_size("jolt_proof", &jolt_proof);
         serialize_and_print_size(" jolt_proof.bytecode", &jolt_proof.bytecode);
 
-        let verification_result = RV32IJoltVM::verify(preprocessing, jolt_proof, jolt_commitments);
+        let verification_result = RV32IJoltVM::verify(program_cp, preprocessing, jolt_proof, jolt_commitments);
         assert!(
             verification_result.is_ok(),
             "Verification failed with error: {:?}",
@@ -149,6 +150,7 @@ where
     let mut program = host::Program::new("sha2-chain-guest");
     program.set_input(&[5u8; 32]);
     program.set_input(&1024u32);
+    let program_cp = program.clone();
 
     let task = move || {
         let (bytecode, memory_init) = program.decode();
@@ -163,7 +165,7 @@ where
             circuit_flags,
             preprocessing.clone(),
         );
-        let verification_result = RV32IJoltVM::verify(preprocessing, jolt_proof, jolt_commitments);
+        let verification_result = RV32IJoltVM::verify(program_cp, preprocessing, jolt_proof, jolt_commitments);
         assert!(
             verification_result.is_ok(),
             "Verification failed with error: {:?}",

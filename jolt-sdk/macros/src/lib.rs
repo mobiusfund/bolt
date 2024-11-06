@@ -122,7 +122,7 @@ impl MacroBuilder {
                 let verify_closure = move |proof: jolt::RV32IHyraxProof| {
                     let program = (*program_cp).clone();
                     let preprocessing = (*preprocessing_cp).clone();
-                    RV32IJoltVM::verify(preprocessing, proof.proof, proof.commitments).is_ok()
+                    RV32IJoltVM::verify(program, preprocessing, proof.proof, proof.commitments).is_ok()
                 };
 
                 (prove_closure, verify_closure)

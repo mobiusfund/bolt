@@ -83,6 +83,10 @@ impl Program {
         self.input.append(&mut serialized);
     }
 
+    pub fn set_inputs(&mut self, inputs: &Vec<u8>) {
+        self.input.append(&mut inputs.clone());
+    }
+
     pub fn set_memory_size(&mut self, len: u64) {
         self.memory_size = len;
     }
