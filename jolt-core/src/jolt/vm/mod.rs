@@ -319,12 +319,10 @@ pub trait Jolt<F: JoltField, PCS: CommitmentScheme<Field = F>, const C: usize, c
         JoltProof<0, C, M, F, PCS>,
         JoltCommitments<PCS>,
     ) {
+        let trace_hash = calc_trace_hash(&trace);
         let trace_length = trace.len();
         let padded_trace_length = trace_length.next_power_of_two();
         println!("Trace length: {}", trace_length);
-
-        let index = std::cmp::max(trace_length - TRACE_HASH_LEN, 0);
-        let trace_hash = calc_hash(&serde_json::to_string(&trace[index..]).unwrap());
         println!("Trace hash: {}", trace_hash);
 
         JoltTraceStep::pad(&mut trace);
@@ -395,20 +393,19 @@ pub trait Jolt<F: JoltField, PCS: CommitmentScheme<Field = F>, const C: usize, c
         let mut transcript = ProofTranscript::new(b"Jolt transcript");
         Self::fiat_shamir_preamble(&mut transcript, &proof.program_io, proof.trace_length);
 
+        // proof.program_io.inputs replaced by local input
         program.set_inputs(&proof.program_io.inputs);
         let (io_device, trace, circuit_flags) = program.trace::<F>();
 
+        let trace_hash = calc_trace_hash(&trace);
         let trace_length = trace.len();
-        //let padded_trace_length = trace_length.next_power_of_two();
+        let padded_trace_length = trace_length.next_power_of_two();
         println!("Trace length: {}", trace_length);
-
-        let index = std::cmp::max(trace_length - TRACE_HASH_LEN, 0);
-        let trace_hash = calc_hash(&serde_json::to_string(&trace[index..]).unwrap());
         println!("Trace hash: {}", trace_hash);
 
-        assert_eq!(proof.trace_hash, trace_hash);
-        assert_eq!(proof.trace_length, trace_length);
-        assert_eq!(proof.program_io.outputs, io_device.outputs);
+        assert_eq!(proof.trace_length, trace_length, "trace length check failed");
+        assert_eq!(proof.trace_hash, trace_hash, "trace hash check failed");
+        assert_eq!(proof.program_io.outputs, io_device.outputs, "proof output check failed");
 
         commitments.append_to_transcript(&mut transcript);
 
@@ -649,19 +646,24 @@ pub trait Jolt<F: JoltField, PCS: CommitmentScheme<Field = F>, const C: usize, c
     }
 }
 
-pub mod bytecode;
-pub mod instruction_lookups;
-pub mod read_write_memory;
-pub mod rv32i_vm;
-pub mod timestamp_range_check;
-
-pub const TRACE_HASH_LEN: usize = 1000;
-use crate::host::Program;
-use serde_json;
-use std::hash::{DefaultHasher, Hash, Hasher};
+fn calc_trace_hash<T: Serialize>(trace: &Vec<T>) -> u64 {
+    let index = std::cmp::max(trace.len() - TRACE_HASH_LEN, 0);
+    calc_hash(&serde_json::to_string(&trace[index..]).unwrap())
+}
 
 fn calc_hash<T: Hash + ?Sized>(t: &T) -> u64 {
     let mut s = DefaultHasher::new();
     t.hash(&mut s);
     s.finish()
 }
+
+use crate::host::Program;
+use serde_json;
+use std::hash::{DefaultHasher, Hash, Hasher};
+pub const TRACE_HASH_LEN: usize = 1000;
+
+pub mod bytecode;
+pub mod instruction_lookups;
+pub mod read_write_memory;
+pub mod rv32i_vm;
+pub mod timestamp_range_check;
